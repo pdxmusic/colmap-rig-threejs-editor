@@ -2,6 +2,9 @@
 
 A Three.js-based tool for visualizing and editing camera rigs, inspired by COLMAP. This editor allows you to manipulate cameras interactively using gizmos and a form-based interface.
 
+
+![Screenshot](screenshot.png)
+
 ## Features
 - Add, delete, and manipulate cameras.
 - Translation and rotation gizmos for precise adjustments.
@@ -12,7 +15,7 @@ A Three.js-based tool for visualizing and editing camera rigs, inspired by COLMA
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/colmap-rig-threejs-editor.git
+   git clone https://github.com/pdxmusic/colmap-rig-threejs-editor.git
    ```
 
 2. Navigate to the project directory:
@@ -42,9 +45,6 @@ A Three.js-based tool for visualizing and editing camera rigs, inspired by COLMA
    - **Manipulate Camera**: Select a camera and use the gizmos (arrows for translation, rings for rotation) or the form to adjust its position and orientation.
    - **Export Configuration**: Click "Export Cameras" to save the current camera setup as a JSON file.
 
-## Screenshot
-
-![Screenshot](screenshot.png)
 
 ## License
 
