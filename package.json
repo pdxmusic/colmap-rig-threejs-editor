@@ -1,0 +1,20 @@
+{
+  "name": "rigmanager",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "papaparse": "^5.5.3",
+    "three": "^0.178.0",
+    "three-viewport-gizmo": "^2.2.0"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}
