@@ -113,15 +113,26 @@ A powerful Three.js-based tool for visualizing and editing camera rigs for COLMA
     {
       "cameras": [
         {
-          "camera_id": 1,
-          "T_cam_rig": [x, y, z],
-          "Q_cam_rig": [w, x, y, z]
+          "image_prefix": "cam0/images/",
+          "ref_sensor": true
+        },
+        {
+          "image_prefix": "cam1/images/",
+          "cam_from_rig_translation": [x, y, z],
+          "cam_from_rig_rotation": [w, x, y, z]
+        },
+        {
+          "image_prefix": "cam2/images/",
+          "cam_from_rig_translation": [x, y, z],
+          "cam_from_rig_rotation": [w, x, y, z]
         }
       ]
     }
   ]
 }
 ```
+
+The first camera is the reference sensor with `ref_sensor: true`. Other cameras have positions and rotations relative to the reference camera using `cam_from_rig_translation` and `cam_from_rig_rotation`. You can have any number of cameras in the rig.
 
 ### Supported 3D Models
 - **.glb** (Binary GLTF)

@@ -926,19 +926,65 @@ window.addEventListener('keydown', handleKeyPress);
 
 // === EXPORT RIG_CONFIG.JSON ===
 function exportCameras() {
+    if (cameraObjects.length === 0) {
+        console.warn('No cameras to export');
+        return;
+    }
+
+    // Get reference camera (first one) position and rotation
+    const refCamera = cameraObjects[0];
+    refCamera.updateMatrixWorld(true);
+    const refPos = new THREE.Vector3();
+    const refQuat = new THREE.Quaternion();
+    refCamera.getWorldPosition(refPos);
+    refCamera.getWorldQuaternion(refQuat);
+    
     const cameraData = cameraObjects.map((cam, idx) => {
-        cam.updateMatrixWorld(true);
-        const pos = new THREE.Vector3();
-        const quat = new THREE.Quaternion();
-        cam.getWorldPosition(pos);
-        cam.getWorldQuaternion(quat);
-        return {
-            camera_id: idx + 1, // numbering from 1
-            T_cam_rig: [Number(pos.x.toFixed(5)), Number(pos.y.toFixed(5)), Number(pos.z.toFixed(5))],
-            Q_cam_rig: [Number(quat.w.toFixed(7)), Number(quat.x.toFixed(7)), Number(quat.y.toFixed(7)), Number(quat.z.toFixed(7))]
-        };
+        if (idx === 0) {
+            // First camera is the reference sensor
+            return {
+                image_prefix: `cam${idx}/images/`,
+                ref_sensor: true
+            };
+        } else {
+            // Other cameras are relative to the reference
+            cam.updateMatrixWorld(true);
+            const pos = new THREE.Vector3();
+            const quat = new THREE.Quaternion();
+            cam.getWorldPosition(pos);
+            cam.getWorldQuaternion(quat);
+            
+            // Calculate relative position (cam position - ref position)
+            const relativePos = pos.clone().sub(refPos);
+            
+            // Calculate relative rotation (inverse of ref rotation * cam rotation)
+            const refQuatInverse = refQuat.clone().invert();
+            const relativeQuat = refQuatInverse.multiply(quat);
+            
+            return {
+                image_prefix: `cam${idx}/images/`,
+                cam_from_rig_translation: [
+                    Number(relativePos.x.toFixed(5)), 
+                    Number(relativePos.y.toFixed(5)), 
+                    Number(relativePos.z.toFixed(5))
+                ],
+                cam_from_rig_rotation: [
+                    Number(relativeQuat.w.toFixed(7)), 
+                    Number(relativeQuat.x.toFixed(7)), 
+                    Number(relativeQuat.y.toFixed(7)), 
+                    Number(relativeQuat.z.toFixed(7))
+                ]
+            };
+        }
     });
-    const blob = new Blob([JSON.stringify({ rigs: [{ cameras: cameraData }] }, null, 2)], { type: "application/json" });
+    
+    const rigConfig = {
+        rigs: [{
+            cameras: cameraData
+        }]
+    };
+    
+    const blob = new Blob([JSON.stringify(rigConfig, null, 2)], { type: "application/json" });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = "rig_config.json";
@@ -971,32 +1017,60 @@ function importCameras(file) {
             // Clear existing cameras
             clearAllCameras();
             
+            // Find reference camera (the one with ref_sensor: true)
+            let refCameraIndex = rig.cameras.findIndex(cam => cam.ref_sensor === true);
+            if (refCameraIndex === -1) {
+                // If no ref_sensor found, assume first camera is reference
+                refCameraIndex = 0;
+                console.warn('No ref_sensor found, assuming first camera is reference');
+            }
+            
+            // Set reference camera at origin for simplicity
+            const refPosition = new THREE.Vector3(0, 0.2, 0); // Default height
+            const refQuaternion = new THREE.Quaternion(); // Identity quaternion
+            
             // Import cameras
             rig.cameras.forEach((cameraData, index) => {
                 try {
-                    // Validate camera data structure
-                    if (!cameraData.T_cam_rig || !Array.isArray(cameraData.T_cam_rig) || cameraData.T_cam_rig.length !== 3) {
-                        console.warn(`Skipping camera ${index + 1}: invalid T_cam_rig`);
-                        return;
-                    }
-                    
-                    if (!cameraData.Q_cam_rig || !Array.isArray(cameraData.Q_cam_rig) || cameraData.Q_cam_rig.length !== 4) {
-                        console.warn(`Skipping camera ${index + 1}: invalid Q_cam_rig`);
-                        return;
-                    }
-                    
                     // Create camera mesh
                     const geometry = new THREE.ConeGeometry(0.075, 0.2, 32);
                     const material = new THREE.MeshStandardMaterial({ color: 0x2266dd });
                     const camMesh = new THREE.Mesh(geometry, material);
                     
-                    // Set position from T_cam_rig
-                    const [x, y, z] = cameraData.T_cam_rig;
-                    camMesh.position.set(x, y, z);
-                    
-                    // Set rotation from Q_cam_rig (quaternion: w, x, y, z)
-                    const [w, qx, qy, qz] = cameraData.Q_cam_rig;
-                    camMesh.quaternion.set(qx, qy, qz, w);
+                    if (index === refCameraIndex || cameraData.ref_sensor === true) {
+                        // Reference camera at origin
+                        camMesh.position.copy(refPosition);
+                        camMesh.quaternion.copy(refQuaternion);
+                        console.log(`Imported reference camera at origin`);
+                    } else {
+                        // Other cameras are relative to reference
+                        if (!cameraData.cam_from_rig_translation || !Array.isArray(cameraData.cam_from_rig_translation) || cameraData.cam_from_rig_translation.length !== 3) {
+                            console.warn(`Skipping camera ${index}: invalid cam_from_rig_translation`);
+                            return;
+                        }
+                        
+                        if (!cameraData.cam_from_rig_rotation || !Array.isArray(cameraData.cam_from_rig_rotation) || cameraData.cam_from_rig_rotation.length !== 4) {
+                            console.warn(`Skipping camera ${index}: invalid cam_from_rig_rotation`);
+                            return;
+                        }
+                        
+                        // Get relative position and rotation
+                        const [relX, relY, relZ] = cameraData.cam_from_rig_translation;
+                        const [w, qx, qy, qz] = cameraData.cam_from_rig_rotation;
+                        
+                        // Apply relative transformation to reference position
+                        const relativePos = new THREE.Vector3(relX, relY, relZ);
+                        const finalPosition = refPosition.clone().add(relativePos);
+                        
+                        // Apply relative rotation to reference rotation
+                        const relativeQuat = new THREE.Quaternion(qx, qy, qz, w);
+                        const finalQuaternion = refQuaternion.clone().multiply(relativeQuat);
+                        
+                        camMesh.position.copy(finalPosition);
+                        camMesh.quaternion.copy(finalQuaternion);
+                        
+                        console.log(`Imported camera ${index} at position (${finalPosition.x.toFixed(3)}, ${finalPosition.y.toFixed(3)}, ${finalPosition.z.toFixed(3)})`);
+                    }
                     
                     // Apply the base rotation for camera orientation
                     camMesh.rotation.x += -Math.PI / 2;
@@ -1004,14 +1078,14 @@ function importCameras(file) {
                     camMesh.castShadow = true;
                     camMesh.userData.isCamera = true;
                     camMesh.userData.originalColor = 0x2266dd;
-                    camMesh.userData.cameraId = cameraData.camera_id || (index + 1);
+                    camMesh.userData.cameraId = index;
+                    camMesh.userData.isReference = (index === refCameraIndex || cameraData.ref_sensor === true);
                     
                     scene.add(camMesh);
                     cameraObjects.push(camMesh);
                     
-                    console.log(`Imported camera ${camMesh.userData.cameraId} at position (${x}, ${y}, ${z})`);
                 } catch (error) {
-                    console.error(`Error importing camera ${index + 1}:`, error);
+                    console.error(`Error importing camera ${index}:`, error);
                 }
             });
             
