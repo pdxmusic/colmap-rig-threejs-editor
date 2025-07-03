@@ -1,6 +1,7 @@
 // main.js
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // Removed problematic TransformControls import
 // import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 
@@ -28,11 +29,16 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 
 // LIGHTS
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+scene.add(new THREE.AmbientLight(0xffffff, 2.0)); // Increased ambient light for better GLB visibility
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
 dirLight.position.set(4, 7, 2);
 dirLight.castShadow = true;
 scene.add(dirLight);
+
+// Additional soft directional light from opposite side for better GLB illumination
+const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.7);
+dirLight2.position.set(-3, 5, -2);
+scene.add(dirLight2);
 
 // GRID in meters - white grid on black background
 const mainGrid = new THREE.GridHelper(20, 20, 0xffffff, 0xffffff); // Main grid for meters
@@ -60,6 +66,16 @@ window.addEventListener('resize', () => {
 const cameraObjects = [];
 let selectedCamera = null;
 
+// === GLB MODELS ARRAY ===
+const glbModels = [];
+let selectedModel = null;
+
+// === CURRENT SELECTION TYPE ===
+let selectionType = null; // 'camera' or 'model'
+
+// === GLTF LOADER ===
+const gltfLoader = new GLTFLoader();
+
 // === RAYCASTER FOR SELECTION ===
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -86,9 +102,61 @@ function addCamera() {
     selectCamera(camMesh);
 }
 
+// === GLB MODEL FUNCTIONS ===
+function uploadGLBModel(file) {
+    if (!file) return;
+    
+    const url = URL.createObjectURL(file);
+    
+    gltfLoader.load(url, (gltf) => {
+        const model = gltf.scene;
+        
+        // Set position to origin
+        model.position.set(0, 0, 0);
+        model.scale.set(1, 1, 1);
+        model.rotation.set(0, 0, 0);
+        
+        // Enable shadows
+        model.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        });
+        
+        // Add metadata
+        model.userData.isGLBModel = true;
+        model.userData.fileName = file.name;
+        model.userData.originalColor = null; // Will be set if needed
+        
+        scene.add(model);
+        glbModels.push(model);
+        
+        console.log('GLB model loaded:', file.name);
+        
+        // Automatically select the new model
+        selectModel(model);
+        
+        // Clean up the URL
+        URL.revokeObjectURL(url);
+    }, 
+    (progress) => {
+        console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%');
+    },
+    (error) => {
+        console.error('Error loading GLB model:', error);
+        URL.revokeObjectURL(url);
+    });
+}
+
 // === CAMERA SELECTION ===
 function selectCamera(camera) {
     console.log('selectCamera called with:', camera);
+    
+    // Deselect model if one was selected
+    if (selectedModel) {
+        selectModel(null);
+    }
     
     // Deselect previous camera
     if (selectedCamera && selectedCamera.material) {
@@ -102,16 +170,23 @@ function selectCamera(camera) {
     }
     
     selectedCamera = camera;
+    selectionType = camera ? 'camera' : null;
     
     if (camera) {
         // Highlight selected camera
         camera.material.color.setHex(0xff6b35);
         
-        // Show controls
+        // Show camera controls
         const controlsDiv = document.getElementById('camera-controls');
         if (controlsDiv) {
             controlsDiv.style.display = 'block';
             console.log('Control panel shown');
+        }
+        
+        // Hide model controls
+        const modelControlsDiv = document.getElementById('model-controls');
+        if (modelControlsDiv) {
+            modelControlsDiv.style.display = 'none';
         }
         
         // Update form values
@@ -127,6 +202,63 @@ function selectCamera(camera) {
             controlsDiv.style.display = 'none';
             console.log('Control panel hidden');
         }
+        
+        // Remove gizmo
+        if (gizmoGroup) {
+            scene.remove(gizmoGroup);
+            gizmoGroup = null;
+            console.log('Gizmo removed');
+        }
+    }
+}
+
+// === MODEL SELECTION ===
+function selectModel(model) {
+    console.log('selectModel called with:', model);
+    
+    // Deselect camera if one was selected
+    if (selectedCamera) {
+        selectCamera(null);
+    }
+    
+    // Reset hover if necessary
+    if (hoveredCamera) {
+        hoveredCamera.material.color.setHex(hoveredCamera.userData.originalColor);
+        hoveredCamera = null;
+    }
+    
+    selectedModel = model;
+    selectionType = 'model';
+    
+    if (model) {
+        // Show model controls
+        const modelControlsDiv = document.getElementById('model-controls');
+        if (modelControlsDiv) {
+            modelControlsDiv.style.display = 'block';
+            console.log('Model control panel shown');
+        }
+        
+        // Hide camera controls
+        const cameraControlsDiv = document.getElementById('camera-controls');
+        if (cameraControlsDiv) {
+            cameraControlsDiv.style.display = 'none';
+        }
+        
+        // Update form values
+        updateModelFormValues();
+        
+        // Create custom gizmo
+        createGizmo(model);
+        console.log('Model gizmo activated');
+    } else {
+        // Hide model controls
+        const modelControlsDiv = document.getElementById('model-controls');
+        if (modelControlsDiv) {
+            modelControlsDiv.style.display = 'none';
+            console.log('Model control panel hidden');
+        }
+        
+        selectionType = null;
         
         // Remove gizmo
         if (gizmoGroup) {
@@ -156,6 +288,31 @@ function updateFormValues() {
     document.getElementById('quatZ').value = Number(quat.z).toFixed(4);
 }
 
+// === UPDATE MODEL FORM VALUES ===
+function updateModelFormValues() {
+    if (!selectedModel) return;
+    
+    selectedModel.updateMatrixWorld(true);
+    const pos = selectedModel.position;
+    const rot = selectedModel.rotation;
+    const scale = selectedModel.scale;
+    
+    // Position
+    document.getElementById('modelPosX').value = Number(pos.x).toFixed(3);
+    document.getElementById('modelPosY').value = Number(pos.y).toFixed(3);
+    document.getElementById('modelPosZ').value = Number(pos.z).toFixed(3);
+    
+    // Rotation (convert from radians to degrees)
+    document.getElementById('modelRotX').value = Number(THREE.MathUtils.radToDeg(rot.x)).toFixed(1);
+    document.getElementById('modelRotY').value = Number(THREE.MathUtils.radToDeg(rot.y)).toFixed(1);
+    document.getElementById('modelRotZ').value = Number(THREE.MathUtils.radToDeg(rot.z)).toFixed(1);
+    
+    // Scale
+    document.getElementById('modelScaleX').value = Number(scale.x).toFixed(2);
+    document.getElementById('modelScaleY').value = Number(scale.y).toFixed(2);
+    document.getElementById('modelScaleZ').value = Number(scale.z).toFixed(2);
+}
+
 // === APPLY VALUES FROM FORM ===
 function applyFormValues() {
     if (!selectedCamera) return;
@@ -183,6 +340,45 @@ function applyFormValues() {
     }
 }
 
+// === APPLY MODEL VALUES FROM FORM ===
+function applyModelFormValues() {
+    if (!selectedModel) return;
+    
+    const posX = parseFloat(document.getElementById('modelPosX').value);
+    const posY = parseFloat(document.getElementById('modelPosY').value);
+    const posZ = parseFloat(document.getElementById('modelPosZ').value);
+    
+    const rotX = parseFloat(document.getElementById('modelRotX').value);
+    const rotY = parseFloat(document.getElementById('modelRotY').value);
+    const rotZ = parseFloat(document.getElementById('modelRotZ').value);
+    
+    const scaleX = parseFloat(document.getElementById('modelScaleX').value);
+    const scaleY = parseFloat(document.getElementById('modelScaleY').value);
+    const scaleZ = parseFloat(document.getElementById('modelScaleZ').value);
+    
+    if (!isNaN(posX) && !isNaN(posY) && !isNaN(posZ)) {
+        selectedModel.position.set(posX, posY, posZ);
+        
+        // Update gizmo position if present
+        if (gizmoGroup) {
+            gizmoGroup.position.copy(selectedModel.position);
+        }
+    }
+    
+    if (!isNaN(rotX) && !isNaN(rotY) && !isNaN(rotZ)) {
+        // Convert from degrees to radians
+        selectedModel.rotation.set(
+            THREE.MathUtils.degToRad(rotX),
+            THREE.MathUtils.degToRad(rotY),
+            THREE.MathUtils.degToRad(rotZ)
+        );
+    }
+    
+    if (!isNaN(scaleX) && !isNaN(scaleY) && !isNaN(scaleZ)) {
+        selectedModel.scale.set(scaleX, scaleY, scaleZ);
+    }
+}
+
 // === DELETE SELECTED CAMERA ===
 function deleteSelectedCamera() {
     if (!selectedCamera) return;
@@ -202,6 +398,25 @@ function deleteSelectedCamera() {
     }
 }
 
+// === DELETE SELECTED MODEL ===
+function deleteSelectedModel() {
+    if (!selectedModel) return;
+    
+    const index = glbModels.indexOf(selectedModel);
+    if (index > -1) {
+        scene.remove(selectedModel);
+        glbModels.splice(index, 1);
+        
+        // Remove controls
+        selectModel(null);
+        
+        // Select another model if available
+        if (glbModels.length > 0) {
+            selectModel(glbModels[glbModels.length - 1]);
+        }
+    }
+}
+
 // === CUSTOM GIZMO ===
 let gizmoGroup = null;
 let isDragging = false;
@@ -209,7 +424,7 @@ let dragAxis = null;
 let dragStart = new THREE.Vector3();
 let cameraStart = new THREE.Vector3();
 let rotationStart = new THREE.Euler();
-let gizmoMode = 'translate'; // 'translate' or 'rotate'
+let gizmoMode = 'translate'; // 'translate', 'rotate', or 'scale'
 
 function createGizmo(targetObject) {
     // Remove previous gizmo
@@ -230,6 +445,8 @@ function createGizmo(targetObject) {
         createTranslationGizmo();
     } else if (gizmoMode === 'rotate') {
         createRotationGizmo();
+    } else if (gizmoMode === 'scale') {
+        createScaleGizmo();
     }
 
     scene.add(gizmoGroup);
@@ -308,9 +525,48 @@ function createRotationGizmo() {
     }
 }
 
+function createScaleGizmo() {
+    // Create cubes for scale on X, Y, Z axes
+    const handleSize = 0.08;
+    const arrowColors = [0xff0000, 0x00ff00, 0x0000ff]; // Red, Green, Blue
+    const axisNames = ['x', 'y', 'z'];
+
+    for (let i = 0; i < 3; i++) {
+        // Scale handle (cube)
+        const geometry = new THREE.BoxGeometry(handleSize, handleSize, handleSize);
+        const material = new THREE.MeshBasicMaterial({ color: arrowColors[i] });
+        const handle = new THREE.Mesh(geometry, material);
+        
+        // Line to center
+        const lineGeometry = new THREE.CylinderGeometry(0.01, 0.01, 0.4, 8);
+        const lineMaterial = new THREE.MeshBasicMaterial({ color: arrowColors[i] });
+        const line = new THREE.Mesh(lineGeometry, lineMaterial);
+        
+        // Position the handle and line
+        if (i === 0) { // X
+            handle.position.x = 0.4;
+            line.rotation.z = -Math.PI / 2;
+        } else if (i === 1) { // Y
+            handle.position.y = 0.4;
+        } else { // Z
+            handle.position.z = 0.4;
+            line.rotation.x = Math.PI / 2;
+        }
+
+        handle.userData.axis = axisNames[i];
+        handle.userData.mode = 'scale';
+        line.userData.axis = axisNames[i];
+        line.userData.mode = 'scale';
+
+        gizmoGroup.add(handle);
+        gizmoGroup.add(line);
+    }
+}
+
 // === GIZMO DRAG HANDLING ===
 function handleGizmoDrag(event) {
-    if (!isDragging || !dragAxis || !selectedCamera) return;
+    const targetObject = selectedCamera || selectedModel;
+    if (!isDragging || !dragAxis || !targetObject) return;
 
     // Calculate normalized mouse position
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -320,6 +576,8 @@ function handleGizmoDrag(event) {
         handleTranslationDrag();
     } else if (gizmoMode === 'rotate') {
         handleRotationDrag(event);
+    } else if (gizmoMode === 'scale') {
+        handleScaleDrag(event);
     }
 }
 
@@ -329,7 +587,8 @@ function handleTranslationDrag() {
     camera.getWorldDirection(direction);
     
     const plane = new THREE.Plane();
-    plane.setFromNormalAndCoplanarPoint(direction, selectedCamera.position);
+    const targetObject = selectedCamera || selectedModel;
+    plane.setFromNormalAndCoplanarPoint(direction, targetObject.position);
 
     // Raycasting to find intersection with the plane
     raycaster.setFromCamera(mouse, camera);
@@ -353,15 +612,19 @@ function handleTranslationDrag() {
                 break;
         }
 
-        selectedCamera.position.copy(newPosition);
+        targetObject.position.copy(newPosition);
         
         // Update gizmo position
         if (gizmoGroup) {
-            gizmoGroup.position.copy(selectedCamera.position);
+            gizmoGroup.position.copy(targetObject.position);
         }
         
         // Update form values
-        updateFormValues();
+        if (selectedCamera) {
+            updateFormValues();
+        } else if (selectedModel) {
+            updateModelFormValues();
+        }
     }
 }
 
@@ -391,10 +654,52 @@ function handleRotationDrag(event) {
             break;
     }
     
-    selectedCamera.rotation.copy(newRotation);
+    const targetObject = selectedCamera || selectedModel;
+    targetObject.rotation.copy(newRotation);
     
-    // Update form values (quaternion)
-    updateFormValues();
+    // Update form values
+    if (selectedCamera) {
+        updateFormValues();
+    } else if (selectedModel) {
+        updateModelFormValues();
+    }
+}
+
+function handleScaleDrag(event) {
+    // Only models can be scaled
+    if (!selectedModel) return;
+    
+    // Calculate mouse delta from initial click
+    const deltaX = event.clientX - mouseDownPosition.x;
+    const deltaY = event.clientY - mouseDownPosition.y;
+    
+    // Scale sensitivity
+    const sensitivity = 0.005;
+    let deltaScale = deltaX * sensitivity;
+    
+    // Get initial scale (stored when drag started)
+    const initialScale = selectedModel.userData.initialScale;
+    if (!initialScale) return; // Safety check
+    
+    const newScale = initialScale.clone();
+    
+    // Apply scale change only on the selected axis
+    switch(dragAxis) {
+        case 'x':
+            newScale.x = Math.max(0.1, initialScale.x + deltaScale);
+            break;
+        case 'y':
+            newScale.y = Math.max(0.1, initialScale.y + deltaScale);
+            break;
+        case 'z':
+            newScale.z = Math.max(0.1, initialScale.z + deltaScale);
+            break;
+    }
+    
+    selectedModel.scale.copy(newScale);
+    
+    // Update form values
+    updateModelFormValues();
 }
 function onMouseDown(event) {
     isMouseDown = true;
@@ -415,16 +720,22 @@ function onMouseDown(event) {
                 dragAxis = clickedPart.userData.axis;
                 controls.enabled = false; // Disable orbit controls
                 
-                // Save initial positions/rotations
-                cameraStart.copy(selectedCamera.position);
-                rotationStart.copy(selectedCamera.rotation);
+                const targetObject = selectedCamera || selectedModel;
+                
+                // Save initial positions/rotations/scales
+                cameraStart.copy(targetObject.position);
+                rotationStart.copy(targetObject.rotation);
+                
+                if (gizmoMode === 'scale' && selectedModel) {
+                    selectedModel.userData.initialScale = selectedModel.scale.clone();
+                }
                 
                 if (gizmoMode === 'translate') {
                     // Calculate starting point for dragging
                     const direction = new THREE.Vector3();
                     camera.getWorldDirection(direction);
                     const plane = new THREE.Plane();
-                    plane.setFromNormalAndCoplanarPoint(direction, selectedCamera.position);
+                    plane.setFromNormalAndCoplanarPoint(direction, targetObject.position);
                     raycaster.ray.intersectPlane(plane, dragStart);
                 }
                 
@@ -465,20 +776,37 @@ function handleCameraSelection(event) {
     // Update raycaster
     raycaster.setFromCamera(mouse, camera);
 
-    // Check intersections with cameras
-    const intersects = raycaster.intersectObjects(cameraObjects);
+    // Check intersections with GLB models first (they might be larger)
+    const modelIntersects = raycaster.intersectObjects(glbModels, true);
+    if (modelIntersects.length > 0) {
+        const clickedModel = modelIntersects[0].object;
+        // Find the root model object
+        let rootModel = clickedModel;
+        while (rootModel.parent && !rootModel.userData.isGLBModel) {
+            rootModel = rootModel.parent;
+        }
+        if (rootModel.userData.isGLBModel) {
+            selectModel(rootModel);
+            console.log('GLB Model selected!');
+            return;
+        }
+    }
 
-    if (intersects.length > 0) {
-        const clickedCamera = intersects[0].object;
+    // Check intersections with cameras
+    const cameraIntersects = raycaster.intersectObjects(cameraObjects);
+    if (cameraIntersects.length > 0) {
+        const clickedCamera = cameraIntersects[0].object;
         if (clickedCamera.userData.isCamera) {
             selectCamera(clickedCamera);
             console.log('Camera selected!');
+            return;
         }
-    } else {
-        // Clicked on empty space - deselect
-        selectCamera(null);
-        console.log('Selection removed');
     }
+    
+    // Clicked on empty space - deselect
+    selectCamera(null);
+    selectModel(null);
+    console.log('Selection removed');
 }
 
 // Add mouse event listeners
@@ -548,7 +876,18 @@ function handleHover(event) {
 
 // === KEYBOARD HANDLING ===
 function handleKeyPress(event) {
-    if (!selectedCamera) return;
+    const targetObject = selectedCamera || selectedModel;
+    
+    // Close info popup with ESC key
+    if (event.key === 'Escape') {
+        const infoPopup = document.getElementById('info-popup');
+        if (infoPopup && infoPopup.style.display === 'flex') {
+            infoPopup.style.display = 'none';
+            return;
+        }
+    }
+    
+    if (!targetObject) return;
     
     switch(event.key.toLowerCase()) {
         case 't':
@@ -557,17 +896,30 @@ function handleKeyPress(event) {
         case 'r':
             setGizmoMode('rotate');
             break;
+        case 's':
+            // Scale mode only for models
+            if (selectedModel) {
+                setGizmoMode('scale');
+            }
+            break;
     }
 }
 
 function setGizmoMode(mode) {
-    if (!selectedCamera) return;
+    const targetObject = selectedCamera || selectedModel;
+    if (!targetObject) return;
+    
+    // Scale mode only for models
+    if (mode === 'scale' && !selectedModel) {
+        console.log('Scale mode is only available for GLB models');
+        return;
+    }
     
     gizmoMode = mode;
     console.log('Mode changed to:', mode);
     
     // Recreate gizmo in new mode
-    createGizmo(selectedCamera);
+    createGizmo(targetObject);
 }
 
 window.addEventListener('keydown', handleKeyPress);
@@ -593,6 +945,111 @@ function exportCameras() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    
+    console.log('Exported', cameraData.length, 'cameras to rig_config.json');
+}
+
+// === IMPORT CAMERAS FROM JSON ===
+function importCameras(file) {
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const jsonData = JSON.parse(e.target.result);
+            
+            // Validate JSON structure
+            if (!jsonData.rigs || !Array.isArray(jsonData.rigs) || jsonData.rigs.length === 0) {
+                throw new Error('Invalid rig_config.json format: missing or empty rigs array');
+            }
+            
+            const rig = jsonData.rigs[0];
+            if (!rig.cameras || !Array.isArray(rig.cameras)) {
+                throw new Error('Invalid rig_config.json format: missing cameras array in first rig');
+            }
+            
+            // Clear existing cameras
+            clearAllCameras();
+            
+            // Import cameras
+            rig.cameras.forEach((cameraData, index) => {
+                try {
+                    // Validate camera data structure
+                    if (!cameraData.T_cam_rig || !Array.isArray(cameraData.T_cam_rig) || cameraData.T_cam_rig.length !== 3) {
+                        console.warn(`Skipping camera ${index + 1}: invalid T_cam_rig`);
+                        return;
+                    }
+                    
+                    if (!cameraData.Q_cam_rig || !Array.isArray(cameraData.Q_cam_rig) || cameraData.Q_cam_rig.length !== 4) {
+                        console.warn(`Skipping camera ${index + 1}: invalid Q_cam_rig`);
+                        return;
+                    }
+                    
+                    // Create camera mesh
+                    const geometry = new THREE.ConeGeometry(0.075, 0.2, 32);
+                    const material = new THREE.MeshStandardMaterial({ color: 0x2266dd });
+                    const camMesh = new THREE.Mesh(geometry, material);
+                    
+                    // Set position from T_cam_rig
+                    const [x, y, z] = cameraData.T_cam_rig;
+                    camMesh.position.set(x, y, z);
+                    
+                    // Set rotation from Q_cam_rig (quaternion: w, x, y, z)
+                    const [w, qx, qy, qz] = cameraData.Q_cam_rig;
+                    camMesh.quaternion.set(qx, qy, qz, w);
+                    
+                    // Apply the base rotation for camera orientation
+                    camMesh.rotation.x += -Math.PI / 2;
+                    
+                    camMesh.castShadow = true;
+                    camMesh.userData.isCamera = true;
+                    camMesh.userData.originalColor = 0x2266dd;
+                    camMesh.userData.cameraId = cameraData.camera_id || (index + 1);
+                    
+                    scene.add(camMesh);
+                    cameraObjects.push(camMesh);
+                    
+                    console.log(`Imported camera ${camMesh.userData.cameraId} at position (${x}, ${y}, ${z})`);
+                } catch (error) {
+                    console.error(`Error importing camera ${index + 1}:`, error);
+                }
+            });
+            
+            console.log(`Successfully imported ${cameraObjects.length} cameras from ${file.name}`);
+            
+            // Select the first camera if any were imported
+            if (cameraObjects.length > 0) {
+                selectCamera(cameraObjects[0]);
+            }
+            
+        } catch (error) {
+            console.error('Error parsing JSON file:', error);
+            alert(`Error importing file: ${error.message}`);
+        }
+    };
+    
+    reader.onerror = () => {
+        console.error('Error reading file');
+        alert('Error reading file');
+    };
+    
+    reader.readAsText(file);
+}
+
+// === CLEAR ALL CAMERAS ===
+function clearAllCameras() {
+    // Remove all cameras from scene
+    cameraObjects.forEach(camera => {
+        scene.remove(camera);
+    });
+    
+    // Clear arrays
+    cameraObjects.length = 0;
+    
+    // Deselect current selection
+    selectCamera(null);
+    
+    console.log('Cleared all cameras from scene');
 }
 
 // === UI INITIALIZATION ===
@@ -602,9 +1059,15 @@ function initializeUI() {
     // Main controls
     const addBtn = document.getElementById('addCameraBtn');
     const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const jsonInput = document.getElementById('jsonImport');
+    const uploadBtn = document.getElementById('uploadGlbBtn');
+    const glbInput = document.getElementById('glbUpload');
     
     if (addBtn) addBtn.textContent = 'Add Camera';
     if (exportBtn) exportBtn.textContent = 'Export Cameras';
+    if (importBtn) importBtn.textContent = 'Import Cameras';
+    if (uploadBtn) uploadBtn.textContent = 'Upload GLB Model';
 
     // Selected camera controls
     const translateBtn = document.getElementById('translateBtn');
@@ -618,6 +1081,19 @@ function initializeUI() {
     if (scaleBtn) scaleBtn.textContent = 'Scale';
     if (applyBtn) applyBtn.textContent = 'Apply Transform';
     if (deleteBtn) deleteBtn.textContent = 'Delete Camera';
+
+    // Selected model controls
+    const modelTranslateBtn = document.getElementById('modelTranslateBtn');
+    const modelRotateBtn = document.getElementById('modelRotateBtn');
+    const modelScaleBtn = document.getElementById('modelScaleBtn');
+    const applyModelBtn = document.getElementById('applyModelTransformBtn');
+    const deleteModelBtn = document.getElementById('deleteModelBtn');
+    
+    if (modelTranslateBtn) modelTranslateBtn.textContent = 'Translate';
+    if (modelRotateBtn) modelRotateBtn.textContent = 'Rotate';
+    if (modelScaleBtn) modelScaleBtn.textContent = 'Scale';
+    if (applyModelBtn) applyModelBtn.textContent = 'Apply Transform';
+    if (deleteModelBtn) deleteModelBtn.textContent = 'Delete Model';
 
     // Input labels
     const labels = {
@@ -635,14 +1111,59 @@ function initializeUI() {
         if (label) label.textContent = labels[id];
     });
 
+    // Event handlers
     if (addBtn) addBtn.onclick = () => addCamera();
     if (exportBtn) exportBtn.onclick = () => exportCameras();
+    if (importBtn) importBtn.onclick = () => jsonInput.click();
+    if (jsonInput) jsonInput.onchange = (e) => {
+        if (e.target.files.length > 0) {
+            importCameras(e.target.files[0]);
+        }
+    };
+    if (uploadBtn) uploadBtn.onclick = () => glbInput.click();
+    if (glbInput) glbInput.onchange = (e) => {
+        if (e.target.files.length > 0) {
+            uploadGLBModel(e.target.files[0]);
+        }
+    };
+    
     if (translateBtn) translateBtn.onclick = () => setGizmoMode('translate');
     if (rotateBtn) rotateBtn.onclick = () => setGizmoMode('rotate');
     if (applyBtn) applyBtn.onclick = () => applyFormValues();
     if (deleteBtn) deleteBtn.onclick = () => deleteSelectedCamera();
+    
+    if (modelTranslateBtn) modelTranslateBtn.onclick = () => setGizmoMode('translate');
+    if (modelRotateBtn) modelRotateBtn.onclick = () => setGizmoMode('rotate');
+    if (modelScaleBtn) modelScaleBtn.onclick = () => setGizmoMode('scale');
+    if (applyModelBtn) applyModelBtn.onclick = () => applyModelFormValues();
+    if (deleteModelBtn) deleteModelBtn.onclick = () => deleteSelectedModel();
 
-    console.log('UI text translated to English!');
+    // Info popup handlers
+    const infoIcon = document.getElementById('info-icon');
+    const infoPopup = document.getElementById('info-popup');
+    const closePopup = document.getElementById('close-popup');
+    
+    if (infoIcon) {
+        infoIcon.onclick = () => {
+            if (infoPopup) infoPopup.style.display = 'flex';
+        };
+    }
+    
+    if (closePopup) {
+        closePopup.onclick = () => {
+            if (infoPopup) infoPopup.style.display = 'none';
+        };
+    }
+    
+    if (infoPopup) {
+        infoPopup.onclick = (e) => {
+            if (e.target === infoPopup) {
+                infoPopup.style.display = 'none';
+            }
+        };
+    }
+
+    console.log('UI initialized with GLB support and info popup!');
 }
 
 // === LOOP ===
@@ -669,8 +1190,18 @@ setTimeout(() => {
 // === USAGE INSTRUCTIONS ===
 /*
 How to use:
-• Click on a camera to select it
+• Click "Upload GLB Model" to load a 3D model for visual reference
+• Click "Import rig_config.json" to load existing camera configurations
+• Click "Add Camera" to manually add new cameras
+• Click on a camera (cone) to select it
+• Click on a GLB model to select it
 • T or button = Translation Mode (arrows)
-• R or button = Rotation Mode (rings)
-• Drag the gizmos to move/rotate
+• R or button = Rotation Mode (rings) 
+• S or button = Scale Mode (cubes, GLB models only)
+• Drag the gizmos to transform objects
+• Click "Export rig_config.json" to save camera positions for COLMAP
+• Models are loaded at origin (0,0,0) with original scale
+• Models can be moved, rotated, and scaled (for visual reference only)
+• Cameras can only be moved and rotated
+• Import will replace all existing cameras with those from the JSON file
 */

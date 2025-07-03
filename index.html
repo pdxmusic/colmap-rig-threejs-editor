@@ -79,19 +79,138 @@
             font-size: 11px;
             color: rgba(255, 255, 255, 0.9); /* White text with better readability */
         }
+        
+        /* Info icon styles */
+        #info-icon {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px; /* Same as buttons */
+            background: rgba(30, 30, 30, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.3); /* Same thickness as buttons */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.8);
+            transition: all 0.3s ease;
+            z-index: 10;
+        }
+        
+        #info-icon:hover {
+            background: rgba(30, 30, 30, 1);
+            border-color: rgba(255, 255, 255, 0.6);
+            color: white;
+            transform: scale(1.1);
+        }
+        
+        /* Info popup styles */
+        #info-popup {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        
+        #info-popup-content {
+            background: #1e1e1e;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+        }
+        
+        #info-popup h2 {
+            margin: 0 0 20px 0;
+            font-size: 24px;
+            color: white;
+            text-align: center;
+        }
+        
+        #info-popup ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        #info-popup li {
+            margin: 12px 0;
+            padding: 8px 0;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.9);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        #info-popup li:last-child {
+            border-bottom: none;
+        }
+        
+        #info-popup .key {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        #close-popup {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            width: auto;
+            margin: 0;
+            padding: 0;
+            transition: color 0.3s ease;
+        }
+        
+        #close-popup:hover {
+            color: white;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        /* Improved label spacing */
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7); /* Subtle text color */
+            margin-bottom: 8px; /* Increased from 5px to 8px */
+        }
     </style>
 </head>
 <body>
     <div id="ui-panel">
         <button id="addCameraBtn">Add Camera</button>
-        <button id="exportBtn">Export rig_config.json</button>
         
-        <div class="info-box">
-            <strong>How to use:</strong><br>
-            • Click on a camera to select it<br>
-            • <strong>T</strong> or button = Translation Mode (arrows)<br>
-            • <strong>R</strong> or button = Rotation Mode (rings)<br>
-            • Drag the gizmos to move/rotate
+        <!-- GLB Upload Section -->
+        <div style="margin: 15px 0; padding-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+            <input type="file" id="glbUpload" accept=".glb,.gltf" style="display: none;">
+            <button id="uploadGlbBtn">Upload GLB Model</button>
+        </div>
+        
+        <!-- Import/Export Section -->
+        <div style="margin: 15px 0; padding-top: 15px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+            <input type="file" id="jsonImport" accept=".json" style="display: none;">
+            <button id="importBtn">Import rig_config.json</button>
+            <button id="exportBtn">Export rig_config.json</button>
         </div>
         
         <div id="camera-controls">
@@ -126,7 +245,72 @@
             <button id="applyTransformBtn">Apply Values</button>
             <button id="deleteCameraBtn" style="background: #dc3545;">Delete Camera</button>
         </div>
+        
+        <!-- GLB Model Controls -->
+        <div id="model-controls" style="display: none;">
+            <h3 style="margin: 0 0 10px 0; font-size: 14px;">Selected GLB Model</h3>
+            
+            <div class="transform-mode">
+                <button id="modelTranslateBtn">Translate (T)</button>
+                <button id="modelRotateBtn">Rotate (R)</button>
+                <button id="modelScaleBtn">Scale (S)</button>
+            </div>
+            
+            <div class="input-group">
+                <label>Position (X, Y, Z):</label>
+                <div class="input-row">
+                    <input type="number" id="modelPosX" step="0.01" placeholder="X">
+                    <input type="number" id="modelPosY" step="0.01" placeholder="Y">
+                    <input type="number" id="modelPosZ" step="0.01" placeholder="Z">
+                </div>
+            </div>
+            
+            <div class="input-group">
+                <label>Rotation (X, Y, Z deg):</label>
+                <div class="input-row">
+                    <input type="number" id="modelRotX" step="1" placeholder="X">
+                    <input type="number" id="modelRotY" step="1" placeholder="Y">
+                    <input type="number" id="modelRotZ" step="1" placeholder="Z">
+                </div>
+            </div>
+            
+            <div class="input-group">
+                <label>Scale (X, Y, Z):</label>
+                <div class="input-row">
+                    <input type="number" id="modelScaleX" step="0.1" placeholder="X" value="1">
+                    <input type="number" id="modelScaleY" step="0.1" placeholder="Y" value="1">
+                    <input type="number" id="modelScaleZ" step="0.1" placeholder="Z" value="1">
+                </div>
+            </div>
+            
+            <button id="applyModelTransformBtn">Apply Values</button>
+            <button id="deleteModelBtn" style="background: #dc3545;">Delete Model</button>
+        </div>
     </div>
+    
+    <!-- Info Icon -->
+    <div id="info-icon" title="How to use">
+        i
+    </div>
+    
+    <!-- Info Popup -->
+    <div id="info-popup">
+        <div id="info-popup-content">
+            <button id="close-popup">&times;</button>
+            <h2>How to Use</h2>
+            <ul>
+                <li>• Upload GLB models for visual reference</li>
+                <li>• Import existing rig_config.json files</li>
+                <li>• Click on cameras/models to select them</li>
+                <li>• <span class="key">T</span> = Translation Mode (arrows)</li>
+                <li>• <span class="key">R</span> = Rotation Mode (rings)</li>
+                <li>• <span class="key">S</span> = Scale Mode (GLB only)</li>
+                <li>• Drag the gizmos to transform</li>
+                <li>• Export rig_config.json for COLMAP</li>
+            </ul>
+        </div>
+    </div>
+    
     <script type="module" src="/main.js"></script>
 </body>
 </html>
