@@ -943,7 +943,7 @@ function exportCameras() {
         if (idx === 0) {
             // First camera is the reference sensor
             return {
-                image_prefix: `cam${idx}/images/`,
+                image_prefix: `rig1/camera${idx}/`,
                 ref_sensor: true
             };
         } else {
@@ -962,7 +962,7 @@ function exportCameras() {
             const relativeQuat = refQuatInverse.multiply(quat);
             
             return {
-                image_prefix: `cam${idx}/images/`,
+                image_prefix: `rig1/camera${idx}/`,
                 cam_from_rig_translation: [
                     Number(relativePos.x.toFixed(5)), 
                     Number(relativePos.y.toFixed(5)), 
